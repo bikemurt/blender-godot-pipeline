@@ -124,8 +124,13 @@ func set_script_params(node, script_filepath):
 			node.set(param_name, e.execute())
 
 func iterate_scene(node):
+	for child in node.get_children():
+		iterate_scene(child)
 	
-	if node is MeshInstance3D:		
+	# after this point, all children have been parsed (or don't exist)
+	# parse this node
+	
+	if node is MeshInstance3D:
 		var mesh_inst : MeshInstance3D = node
 		
 		var metas = node.get_meta_list()
@@ -138,8 +143,9 @@ func iterate_scene(node):
 					var surface = surface_split[1]
 					var material = load(meta_val)
 					
-					var shader = load(node.get_meta("shader"))
-					material.set_shader(shader)
+					if "shader" in metas:
+						var shader = load(node.get_meta("shader"))
+						material.set_shader(shader)
 					
 					node.set_surface_override_material(int(surface), material)
 			
@@ -231,7 +237,126 @@ func iterate_scene(node):
 				target.hide()
 				delete_nodes.append(node)
 			
+			# new collision logic as of v1.3 2024/02/01
 			if meta == "collision":
+				var rigid_body = false
+				if "-r" in meta_val: rigid_body = true
+				
+				var simple = "simple" in meta_val
+				var trimesh = "trimesh" in meta_val
+				
+				var complex_col = simple or trimesh
+				if complex_col:
+					if simple: mesh_inst.create_convex_collision()
+					if trimesh: mesh_inst.create_trimesh_collision()
+					mesh_inst.set_owner(get_tree().edited_scene_root)
+					
+					if rigid_body:
+						var body = RigidBody3D.new()
+						body.name = node.name + "_RigidBody3D"
+												
+						var col = node.get_children()[0].get_children()[0]
+						reparent_nodes.append([col, body])
+						
+						reparent_nodes.append([node, body])
+						
+						delete_nodes.append(node.get_children()[0])
+						
+						node.get_parent().add_child(body)
+						body.set_owner(get_tree().edited_scene_root)
+				
+				if not complex_col:
+					var t = node.transform
+					var body = StaticBody3D.new()
+					body.name = "StaticBody3D_" + node.name
+					
+					if rigid_body:
+						body = RigidBody3D.new()
+						body.name = "RigidBody3D_" + node.name
+					
+					var col_only = "-c" in meta_val
+					
+					body.position = node.position
+					
+					var nd : Node3D = node.duplicate()
+					# clear all children
+					var children = []
+					for child in nd.get_children():
+						children.append(child)
+					for child in children:
+						nd.remove_child(child)
+					
+					nd.transform = Transform3D()
+					nd.scale = node.scale
+					nd.rotation = node.rotation
+					
+					body.add_child(nd)
+					
+					# only create a collision if not bodyonly
+					var cs = CollisionShape3D.new()
+					if "bodyonly" not in meta_val:
+						cs.name = "CollisionShape3D_" + node.name
+						
+						if col_only:
+							# here we capture position too because
+							# these will be parented to a body
+							# and we want to get the relative position
+							cs.position = node.position
+						
+						cs.scale = node.scale
+						cs.rotation = node.rotation
+						
+						if "box" in meta_val:
+							if "size_x" in metas and "size_x" in metas \
+							and "size_z" in metas:
+								var bx = BoxShape3D.new()
+								
+								var size_x = float(node.get_meta("size_x"))
+								var size_y = float(node.get_meta("size_y"))
+								var size_z = float(node.get_meta("size_z"))
+								
+								bx.size = Vector3(size_x, size_y, size_z)
+								
+								cs.shape = bx
+						
+						if "cylinder" in meta_val:
+							if "height" in metas and "radius" in metas:
+								var cyl = CylinderShape3D.new()
+								
+								var height = float(node.get_meta("height"))
+								var radius = float(node.get_meta("radius"))
+								
+								cyl.height = height
+								cyl.radius = radius
+								
+								cs.shape = cyl
+						
+						if col_only:
+							# collision gets added to the node parent mesh
+							node.get_parent().add_child(cs)
+							
+						else:
+							# otherwise add it to the body
+							body.add_child(cs)
+					
+					if not col_only:
+						add_child(body)
+						body.owner = get_tree().edited_scene_root
+						nd.owner = get_tree().edited_scene_root
+					
+					cs.owner = get_tree().edited_scene_root
+					
+					# check for any collisions children, reparent to body
+					for child in node.get_children():
+						if not col_only:
+							if child is CollisionShape3D:
+								reparent_nodes.append([child, body])
+					
+					delete_nodes.append(node)
+			
+			# legacy collision functions
+			# these are deprecated as of v1.3 2024/02/01
+			if meta == "collision-x":
 				var rigid_body = false
 				var col_only = false
 				
@@ -305,8 +430,6 @@ func iterate_scene(node):
 				if meta_val == "hide":
 					node.hide()	
 				
-	for child in node.get_children():
-		iterate_scene(child)
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta):
