@@ -62,8 +62,8 @@ func iterateScene(node):
 		# anything directly baked from simple bake should not be imported
 		# either materials are used from a bake
 		# or an instance should be used
-		if node.name.ends_with("_Baked"):
-			remove_nodes.append(node)
+		#if node.name.ends_with("_Baked"):
+		#	remove_nodes.append(node)
 		
 		if "_Remove" in node.name:
 			remove_nodes.append(node)
