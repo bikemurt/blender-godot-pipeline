@@ -287,6 +287,25 @@ func _collision(node, metas, meta, meta_val):
 	else:
 		_simple_col(node, rigid_body, area_3d, meta_val, metas)
 
+func _nav_mesh(node, meta, meta_val) -> void:
+	var mesh_inst: MeshInstance3D = node
+	ResourceSaver.save(mesh_inst.mesh, meta_val)
+	
+	var n := NavigationMesh.new()
+	
+	mesh_inst.mesh.resource_name = mesh_inst.name + "_NavMesh"
+	n.create_from_mesh(mesh_inst.mesh)
+	
+	var nr := NavigationRegion3D.new()
+	nr.navigation_mesh = n
+	nr.transform = mesh_inst.transform
+	nr.name = mesh_inst.name + "_NavMesh"
+	
+	mesh_inst.get_parent().add_child(nr)
+	nr.owner = get_tree().edited_scene_root
+	
+	delete_nodes.append(mesh_inst)
+
 func iterate_scene(node):
 	for child in node.get_children():
 		iterate_scene(child)
@@ -324,3 +343,6 @@ func iterate_scene(node):
 			if meta == "state":
 				if meta_val == "hide":
 					node.hide()	
+			
+			if meta == "nav_mesh":
+				_nav_mesh(node, meta, meta_val)
