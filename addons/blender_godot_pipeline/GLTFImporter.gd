@@ -8,7 +8,8 @@ var remove_nodes = []
 # Called right after the scene is imported and gets the root node.
 func _post_import(scene):
 	# Change all node names to "modified_[oldnodename]"
-
+	
+	print("Blender-Godot Pipeline: Starting the post import process.")
 	var file = FileAccess.open(get_source_file(), FileAccess.READ)
 	var content = file.get_as_text()
 	
@@ -22,12 +23,14 @@ func _post_import(scene):
 	scene.set_script(load("res://addons/blender_godot_pipeline/SceneInit.gd"))
 	scene.set_meta("run", true)
 	
+	print("Blender-Godot Pipeline: Post import complete.")
+	
 	return scene # Remember to return the imported scene
 
 
 func deleteExtras():
 	for node in remove_nodes:
-		print("Removed " + node.name)
+		#print("Removed " + node.name)
 		node.free()
 
 func parseGLTF(json):
@@ -52,11 +55,22 @@ func addExtrasToDict(nodeName, extras):
 
 func iterateScene(node):
 	if node != null:
+		
+		# if another node on this level has my name, delete it
+		if node.get_parent():
+			for n in node.get_parent().get_children():
+				if n.name == node.name:
+					pass
+					#print(node.name)
+					#print('oops')
+		
+		#print(node.name)
+		
 		if (node.name in node_extras_dict) and (node is MeshInstance3D):
 			var extras = node_extras_dict[node.name]
-			print("Set extras for: " + node.name)
+			#print("Set extras for: " + node.name)
 			for key in extras:
-				print(key + "=" + extras[key])
+				#print(key + "=" + extras[key])
 				node.set_meta(key, extras[key])
 			
 		# anything directly baked from simple bake should not be imported

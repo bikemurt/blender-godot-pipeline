@@ -1,22 +1,75 @@
 @tool
 
-extends Node
+extends Node3D
+
+## By clicking on "Remove Import Node", you will remove the originally imported
+## GLTF node from your scene. This should be done when the design of a 
+## level is complete. Doing this effectively disables "hot reload",
+## so if you make further changes to your scene in Blender, you need to delete the
+## _Imported node from the scene tree, re-import the GLTF file, and drag it 
+## into the scene tree.
+@export var remove_import_node := false:
+	get: return remove_import_node
+	set(value):
+		if value and Engine.is_editor_hint():
+			queue_free()
 
 var reparent_nodes = []
 var delete_nodes = []
+var multimesh_dict = {}
 
-func _ready():
+var duplicate_scene: Node
+func run_setup() -> void:
 	if Engine.is_editor_hint():
 		if get_meta("run"):
-			print("Running scene init")
 			
-			iterate_scene(self)
+			print("Blender-Godot Pipeline: Running SceneInit - processing the scene.")
+			
+			duplicate_all()
+			
+			iterate_scene(duplicate_scene)
+			
+			process_multimeshes(duplicate_scene)
 			
 			reparent_pass()
 			delete_pass()
 			
+			# SECOND PASS - process materials
+			iterate_scene_pass2(duplicate_scene)
+			
 			# ensure that SceneInit only runs once
 			set_meta("run", false)
+			
+			hide()
+			
+			print("Blender-Godot Pipeline: Scene processing complete. ")
+
+func _ready():
+	run_setup()
+
+func duplicate_all() -> void:
+	
+	duplicate_scene = duplicate()
+	duplicate_scene.set_script(null)
+	
+	# check if duplicate already exists
+	var new_name := name + "_Imported"
+	var delete_node: Node = null
+	for c in get_parent().get_children():
+		if c.name == new_name:
+			delete_node = c
+	
+	if delete_node:
+		get_parent().remove_child(delete_node)
+		delete_node.queue_free()
+	
+	duplicate_scene.scene_file_path = ""
+	duplicate_scene.name = new_name
+	
+	get_parent().add_child(duplicate_scene)
+	duplicate_scene.owner = get_tree().edited_scene_root
+
+###
 
 func reparent_pass():
 	for node in reparent_nodes:
@@ -34,7 +87,7 @@ func set_children_scene_root(node):
 		set_children_scene_root(child)
 		child.set_owner(get_tree().edited_scene_root)
 
-func set_script_params(node, script_filepath):
+func _set_script_params(node, script_filepath):
 	var script_file = FileAccess.open(script_filepath, FileAccess.READ)
 	
 	while not script_file.eof_reached():
@@ -59,7 +112,8 @@ func _material(node, metas, meta, meta_val):
 			material.set_shader(shader)
 		
 		node.set_surface_override_material(int(surface), material)
-					
+			
+# 2024-05-09 LEGACY... eventually remove
 func _multimesh(node, metas, meta, meta_val):
 	var mm_i = MultiMeshInstance3D.new()
 	node.get_parent().add_child(mm_i)
@@ -92,7 +146,7 @@ func _multimesh(node, metas, meta, meta_val):
 	##
 	
 	if "prop_file" in metas:
-		set_script_params(mm_i, node.get_meta("prop_file"))
+		_set_script_params(mm_i, node.get_meta("prop_file"))
 	
 	# occlusion culling flickers... more investigation needed
 	if "occlusion_culling" in metas:
@@ -136,8 +190,22 @@ func _multimesh(node, metas, meta, meta_val):
 	target.hide()
 	delete_nodes.append(node)
 
+# COLLLISIONS
+func collision_script(body, node, metas) -> void:
+	if "script" in metas:
+		body.set_script(load(node.get_meta("script")))
+		
+		if "prop_file" in metas:
+			# collision handled separately
+			_set_script_params(body, node.get_meta("prop_file"))
+	
+	if "physics_mat" in metas:
+		if body is StaticBody3D or body is RigidBody3D:
+			body.physics_material_override = load(node.get_meta("physics_mat"))
+
 func _complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas):
 	var mesh_inst : MeshInstance3D = node
+
 	if simple: mesh_inst.create_convex_collision()
 	if trimesh: mesh_inst.create_trimesh_collision()
 	mesh_inst.set_owner(get_tree().edited_scene_root)
@@ -154,10 +222,6 @@ func _complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas):
 		body = Area3D.new()
 		body.name = node.name + "_Area3D"
 	
-	if "name_override" in metas:
-		if node.get_meta("name_override") != "":
-			body.name = node.get_meta("name_override")
-	
 	var col = node.get_children()[0].get_children()[0]
 	reparent_nodes.append([col, body])
 	
@@ -170,6 +234,8 @@ func _complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas):
 	
 	node.get_parent().add_child(body)
 	body.set_owner(get_tree().edited_scene_root)
+	
+	collision_script(body, node, metas)
 
 func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 	var t = node.transform
@@ -184,10 +250,6 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 		body = Area3D.new()
 		body.name = "Area3D_" + node.name
 
-	if "name_override" in metas:
-		if node.get_meta("name_override") != "":
-			body.name = node.get_meta("name_override")
-	
 	var col_only = "-c" in meta_val
 	
 	body.position = node.position
@@ -247,6 +309,16 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 				
 				cs.shape = cyl
 		
+		if "sphere" in meta_val:
+			if "radius" in metas:
+				var sph = SphereShape3D.new()
+				
+				var radius = float(node.get_meta("radius"))
+				
+				sph.radius = radius
+				
+				cs.shape = sph
+		
 		if col_only:
 			# collision gets added to the node parent mesh
 			node.get_parent().add_child(cs)
@@ -256,7 +328,7 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 			body.add_child(cs)
 	
 	if not col_only:
-		add_child(body)
+		node.get_parent().add_child(body)
 		body.owner = get_tree().edited_scene_root
 		if not discard_mesh: nd.owner = get_tree().edited_scene_root
 	
@@ -269,6 +341,8 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 				reparent_nodes.append([child, body])
 	
 	delete_nodes.append(node)
+	
+	collision_script(body, node, metas)
 
 func _collision(node, metas, meta, meta_val):
 	var mesh_inst : MeshInstance3D = node
@@ -287,6 +361,7 @@ func _collision(node, metas, meta, meta_val):
 	else:
 		_simple_col(node, rigid_body, area_3d, meta_val, metas)
 
+# NAV MESH
 func _nav_mesh(node, meta, meta_val) -> void:
 	var mesh_inst: MeshInstance3D = node
 	ResourceSaver.save(mesh_inst.mesh, meta_val)
@@ -306,12 +381,57 @@ func _nav_mesh(node, meta, meta_val) -> void:
 	
 	delete_nodes.append(mesh_inst)
 
+# MULTTIMESH
+func _multimesh_new(node, meta, meta_val) -> void:
+	if meta_val not in multimesh_dict:
+		multimesh_dict[meta_val] = []
+		var mi: MeshInstance3D = node
+		var mi_mesh: Resource = mi.mesh
+		
+		mi_mesh.resource_name = node.name
+		ResourceSaver.save(mi_mesh, meta_val)
+		mi_mesh.take_over_path(meta_val)
+		#mi.mesh.resource_name = node.name
+		
+	multimesh_dict[meta_val].push_back(node.transform)
+	
+	delete_nodes.push_back(node)
+
+func process_multimeshes(parent: Node) -> void:
+	for mm in multimesh_dict:
+		
+		var mm_i = MultiMeshInstance3D.new()
+		var multimesh := MultiMesh.new()
+		
+		multimesh.transform_format = MultiMesh.TRANSFORM_3D
+		
+		var size = len(multimesh_dict[mm])
+		multimesh.instance_count = size
+		
+		var i := 0
+		for loc in multimesh_dict[mm]:
+			multimesh.set_instance_transform(i, loc)
+			i += 1
+		
+		multimesh.mesh = ResourceLoader.load(mm)
+		
+		mm_i.multimesh = multimesh
+		mm_i.name = multimesh.mesh.resource_name + "_Multimesh"
+		
+		parent.add_child(mm_i)
+		mm_i.owner = get_tree().edited_scene_root
+
+func _set_script(node, metas, meta, meta_val) -> void:
+	if "collision" not in metas:
+		node.set_script(load(meta_val))
+
 func iterate_scene(node):
 	for child in node.get_children():
 		iterate_scene(child)
-	
+
 	# after this point, all children have been parsed (or don't exist)
 	# we only ever parse mesh instance 3Ds from Blender (e.g. BLENDER OBJECTS)
+	node.owner = get_tree().edited_scene_root
 	if node is MeshInstance3D:
 		var mesh_inst : MeshInstance3D = node
 		
@@ -319,9 +439,13 @@ func iterate_scene(node):
 		for meta in metas:
 			
 			var meta_val = node.get_meta(meta)
-			if "material" in meta:
-				_material(node, metas, meta, meta_val)
 			
+			# PARSE NAME OVERRIDE FIRST
+			if "name_override" in metas:
+				if node.get_meta("name_override") != "":
+					mesh_inst.name = node.get_meta("name_override")
+			
+			# 2024-05-09 I don't even know what this was for anymore
 			if "group" in meta:
 				# TBD
 				pass
@@ -331,8 +455,14 @@ func iterate_scene(node):
 				pass
 			
 			if meta == "script":
-				node.set_script(load(meta_val))
+				_set_script(node, metas, meta, meta_val)
 			
+			if meta == "prop_file":
+				# collision handled separately. good reasons for this
+				if "collision" not in metas:
+					_set_script_params(node, meta_val)
+			
+			# LEGACY MULTIMESH
 			if meta == "multimesh_target":
 				_multimesh(node, metas, meta, meta_val)
 			
@@ -342,7 +472,22 @@ func iterate_scene(node):
 			
 			if meta == "state":
 				if meta_val == "hide":
-					node.hide()	
+					node.hide()
 			
 			if meta == "nav_mesh":
 				_nav_mesh(node, meta, meta_val)
+				
+			if meta == "multimesh":
+				_multimesh_new(node, meta, meta_val)
+
+func iterate_scene_pass2(node):
+	for child in node.get_children():
+		iterate_scene_pass2(child)
+
+	# not explicitly checking if node is MeshInstance3D here..
+	# maybe this is a good idea?
+	var metas = node.get_meta_list()
+	for meta in metas:
+		var meta_val = node.get_meta(meta)
+		if "material" in meta:
+			_material(node, metas, meta, meta_val)
