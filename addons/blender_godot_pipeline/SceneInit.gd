@@ -194,10 +194,10 @@ func _multimesh(node, metas, meta, meta_val):
 func collision_script(body, node, metas) -> void:
 	if "script" in metas:
 		body.set_script(load(node.get_meta("script")))
-		
-		if "prop_file" in metas:
-			# collision handled separately
-			_set_script_params(body, node.get_meta("prop_file"))
+	
+	if "prop_file" in metas:
+		# collision handled separately
+		_set_script_params(body, node.get_meta("prop_file"))
 	
 	if "physics_mat" in metas:
 		if body is StaticBody3D or body is RigidBody3D:
