@@ -375,6 +375,7 @@ func _nav_mesh(node, meta, meta_val) -> void:
 	nr.navigation_mesh = n
 	nr.transform = mesh_inst.transform
 	nr.name = mesh_inst.name + "_NavMesh"
+	_set_script_params(nr, node.get_meta("prop_file"))
 	
 	mesh_inst.get_parent().add_child(nr)
 	nr.owner = get_tree().edited_scene_root
@@ -459,7 +460,7 @@ func iterate_scene(node):
 			
 			if meta == "prop_file":
 				# collision handled separately. good reasons for this
-				if "collision" not in metas:
+				if "collision" not in metas and "nav_mesh" not in metas:
 					_set_script_params(node, meta_val)
 			
 			# LEGACY MULTIMESH
