@@ -4,13 +4,21 @@ extends EditorScenePostImport
 var node_extras_dict = {}
 var remove_nodes = []
 
-# This sample changes all node names.
-# Called right after the scene is imported and gets the root node.
 func _post_import(scene):
-	# Change all node names to "modified_[oldnodename]"
-	
 	print("Blender-Godot Pipeline: Starting the post import process.")
-	var file = FileAccess.open(get_source_file(), FileAccess.READ)
+	
+	var source := get_source_file()
+	
+	if ".blend" in source:
+		var use_hidden: bool = ProjectSettings.get_setting("application/config/use_hidden_project_data_directory")
+		
+		var data_folder := "godot"
+		if use_hidden: data_folder = ".godot"
+		
+		var imported_file := "res://"+data_folder+"/imported/" + source.get_file().replace(".blend", "") + "-" + source.md5_text() + ".gltf"
+		source = imported_file
+
+	var file = FileAccess.open(source, FileAccess.READ)
 	var content = file.get_as_text()
 	
 	var json = JSON.new()

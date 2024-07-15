@@ -1,15 +1,19 @@
+# Michael Burt 2024
+# www.michaeljared.ca
+# Reach out on Twitter for support @_michaeljared
+
 @tool
 
 extends Node3D
 
-## By clicking on "Remove Import Node", you will remove the originally imported
+## Remove the originally imported
 ## GLTF node from your scene. This should be done when the design of a 
 ## level is complete. Doing this effectively disables "hot reload",
 ## so if you make further changes to your scene in Blender, you need to delete the
 ## _Imported node from the scene tree, re-import the GLTF file, and drag it 
 ## into the scene tree.
-@export var remove_import_node := false:
-	get: return remove_import_node
+@export var remove_original_node := false:
+	get: return remove_original_node
 	set(value):
 		if value and Engine.is_editor_hint():
 			queue_free()
@@ -26,6 +30,8 @@ func run_setup() -> void:
 			print("Blender-Godot Pipeline: Running SceneInit - processing the scene.")
 			
 			duplicate_all()
+			
+			remove_skips(duplicate_scene)
 			
 			iterate_scene(duplicate_scene)
 			
@@ -203,6 +209,7 @@ func collision_script(body, node, metas) -> void:
 		if body is StaticBody3D or body is RigidBody3D:
 			body.physics_material_override = load(node.get_meta("physics_mat"))
 
+# LEGACY 06/24/24
 func _complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas):
 	var mesh_inst : MeshInstance3D = node
 
@@ -237,7 +244,9 @@ func _complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas):
 	
 	collision_script(body, node, metas)
 
-func _simple_col(node, rigid_body, area_3d, meta_val, metas):
+
+# NEW COLLISION - CAPTURES ALL TYPES NOW 06/24/24
+func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 	var t = node.transform
 	var body = StaticBody3D.new()
 	body.name = "StaticBody3D_" + node.name
@@ -249,7 +258,27 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 	if area_3d:
 		body = Area3D.new()
 		body.name = "Area3D_" + node.name
-
+	
+	# --- NEW --- migrating simple/trimesh into primitive function
+	
+	var simple: bool = "simple" in meta_val
+	var trimesh: bool = "trimesh" in meta_val
+	var mesh_inst: MeshInstance3D = node
+	var trimesh_shape := ConcavePolygonShape3D.new()
+	var simple_shape := ConvexPolygonShape3D.new()
+	if simple:
+		mesh_inst.create_convex_collision()
+		body = node.get_children()[0].duplicate()
+		var col_shape_3d: CollisionShape3D = body.get_children()[0]
+		simple_shape = col_shape_3d.shape.duplicate()
+	if trimesh:
+		mesh_inst.create_trimesh_collision()
+		body = node.get_children()[0].duplicate()
+		var col_shape_3d: CollisionShape3D = body.get_children()[0]
+		trimesh_shape = col_shape_3d.shape.duplicate()
+	
+	# ---
+	
 	var col_only = "-c" in meta_val
 	
 	body.position = node.position
@@ -319,6 +348,9 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 				
 				cs.shape = sph
 		
+		if trimesh: cs.shape = trimesh_shape
+		if simple: cs.shape = simple_shape
+		
 		if col_only:
 			# collision gets added to the node parent mesh
 			node.get_parent().add_child(cs)
@@ -330,6 +362,7 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 	if not col_only:
 		node.get_parent().add_child(body)
 		body.owner = get_tree().edited_scene_root
+		
 		if not discard_mesh: nd.owner = get_tree().edited_scene_root
 	
 	cs.owner = get_tree().edited_scene_root
@@ -344,6 +377,7 @@ func _simple_col(node, rigid_body, area_3d, meta_val, metas):
 	
 	collision_script(body, node, metas)
 
+# NEW COLLISION - CAPTURES ALL TYPES NOW 06/24/24
 func _collision(node, metas, meta, meta_val):
 	var mesh_inst : MeshInstance3D = node
 	
@@ -356,10 +390,11 @@ func _collision(node, metas, meta, meta_val):
 	var simple = "simple" in meta_val
 	var trimesh = "trimesh" in meta_val
 	
-	if simple or trimesh:
-		_complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas)
+	if simple or trimesh:	
+		_primitive_col(node, rigid_body, area_3d, meta_val, metas)
+		#_complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas)
 	else:
-		_simple_col(node, rigid_body, area_3d, meta_val, metas)
+		_primitive_col(node, rigid_body, area_3d, meta_val, metas)
 
 # NAV MESH
 func _nav_mesh(node, meta, meta_val) -> void:
@@ -426,6 +461,15 @@ func _set_script(node, metas, meta, meta_val) -> void:
 	if "collision" not in metas:
 		node.set_script(load(meta_val))
 
+func remove_skips(node):
+	var n: Node3D
+	for child in node.get_children():
+		if "state" in child.get_meta_list():
+			if child.get_meta("state") == "skip":
+				child.queue_free()
+			else:
+				remove_skips(child)
+
 func iterate_scene(node):
 	for child in node.get_children():
 		iterate_scene(child)
@@ -441,6 +485,10 @@ func iterate_scene(node):
 			
 			var meta_val = node.get_meta(meta)
 			
+			if meta == "state":
+				if meta_val == "hide":
+					node.hide()
+					
 			# PARSE NAME OVERRIDE FIRST
 			if "name_override" in metas:
 				if node.get_meta("name_override") != "":
@@ -448,10 +496,6 @@ func iterate_scene(node):
 			
 			# 2024-05-09 I don't even know what this was for anymore
 			if "group" in meta:
-				# TBD
-				pass
-			
-			if "prop_file" in meta:
 				# TBD
 				pass
 			
@@ -470,10 +514,6 @@ func iterate_scene(node):
 			# new collision logic as of v1.3 2024/02/01
 			if meta == "collision":
 				_collision(node, metas, meta, meta_val)
-			
-			if meta == "state":
-				if meta_val == "hide":
-					node.hide()
 			
 			if meta == "nav_mesh":
 				_nav_mesh(node, meta, meta_val)
