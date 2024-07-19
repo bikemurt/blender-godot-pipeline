@@ -29,6 +29,8 @@ func run_setup() -> void:
 			
 			print("Blender-Godot Pipeline: Running SceneInit - processing the scene.")
 			
+			await get_tree().create_timer(0.1).timeout
+	
 			duplicate_all()
 			
 			remove_skips(duplicate_scene)
@@ -56,6 +58,8 @@ func _ready():
 func duplicate_all() -> void:
 	
 	duplicate_scene = duplicate()
+	duplicate_scene.show()
+	
 	duplicate_scene.set_script(null)
 	
 	# check if duplicate already exists
