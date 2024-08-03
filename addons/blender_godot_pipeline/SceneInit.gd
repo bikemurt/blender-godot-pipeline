@@ -104,8 +104,8 @@ func _set_script_params(node, script_filepath):
 		var line = script_file.get_line()
 		var components = line.split('=')
 		if len(components) > 1:
-			var param_name = components[0]
-			var expression = components[1]
+			var param_name = components[0].rstrip(" ")
+			var expression = components[1].rstrip(" ")
 			
 			var e = Expression.new()
 			e.parse(expression)
