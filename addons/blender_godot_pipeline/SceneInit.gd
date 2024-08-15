@@ -97,19 +97,39 @@ func set_children_scene_root(node):
 		set_children_scene_root(child)
 		child.set_owner(get_tree().edited_scene_root)
 
-func _set_script_params(node, script_filepath):
+func _set_script_params(node:Node, script_filepath):
 	var script_file = FileAccess.open(script_filepath, FileAccess.READ)
-	
+
 	while not script_file.eof_reached():
 		var line = script_file.get_line()
-		var components = line.split('=')
-		if len(components) > 1:
-			var param_name = components[0].rstrip(" ")
-			var expression = components[1].rstrip(" ")
-			
-			var e = Expression.new()
-			e.parse(expression)
-			node.set(param_name, e.execute())
+		_eval_params_line(node, line)
+
+func _set_script_params_str(node:Node, string:String):
+	var lines = string.split(";")
+	for line in lines:
+		_eval_params_line(node, line)
+
+func _eval_params_line(node:Node, line:String):
+	var components = line.split('=')
+	if len(components) > 1:
+		var param_name = components[0].strip_edges()
+		var expression = components[1].strip_edges()
+
+		var e = Expression.new()
+		e.parse(expression, ['node'])
+		var x = e.execute([node])
+		if e.has_execute_failed():
+			printerr("Execution Error on line '",line ,": ",e.get_error_text())
+		node.set(param_name, x)
+		#print(param_name,expression,e,x, node.get(param_name))
+	else:
+		var e = Expression.new()
+		e.parse(line, ['node'])
+		var x = e.execute([node])
+		print(line,e,x, node)
+		if e.has_execute_failed():
+			printerr("Execution Error on line '",line ,": ",e.get_error_text())
+
 
 func _material(node, metas, meta, meta_val):
 	var surface_split = meta.split("_")
@@ -157,6 +177,10 @@ func _multimesh(node, metas, meta, meta_val):
 	
 	if "prop_file" in metas:
 		_set_script_params(mm_i, node.get_meta("prop_file"))
+
+	if "prop_string" in metas:
+		_set_script_params_str(mm_i, node.get_meta("prop_string"))
+
 	
 	# occlusion culling flickers... more investigation needed
 	if "occlusion_culling" in metas:
@@ -208,6 +232,9 @@ func collision_script(body, node, metas) -> void:
 	if "prop_file" in metas:
 		# collision handled separately
 		_set_script_params(body, node.get_meta("prop_file"))
+
+	if "prop_string" in metas:
+		_set_script_params_str(body, node.get_meta("prop_string"))
 	
 	if "physics_mat" in metas:
 		if body is StaticBody3D or body is RigidBody3D:
@@ -510,6 +537,10 @@ func iterate_scene(node):
 				# collision handled separately. good reasons for this
 				if "collision" not in metas and "nav_mesh" not in metas:
 					_set_script_params(node, meta_val)
+
+			if "prop_string" in metas:
+				if "collision" not in metas :
+					_set_script_params_str(node, meta_val)
 			
 			# LEGACY MULTIMESH
 			if meta == "multimesh_target":
