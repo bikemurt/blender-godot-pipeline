@@ -97,19 +97,40 @@ func set_children_scene_root(node):
 		set_children_scene_root(child)
 		child.set_owner(get_tree().edited_scene_root)
 
-func _set_script_params(node, script_filepath):
+func _set_script_params(node:Node, script_filepath):
 	var script_file = FileAccess.open(script_filepath, FileAccess.READ)
-	
+
 	while not script_file.eof_reached():
 		var line = script_file.get_line()
-		var components = line.split('=')
-		if len(components) > 1:
-			var param_name = components[0].rstrip(" ")
-			var expression = components[1].rstrip(" ")
-			
-			var e = Expression.new()
-			e.parse(expression)
-			node.set(param_name, e.execute())
+		if line != "":
+			_eval_params_line(node, line)
+
+func _set_script_params_str(node:Node, string:String):
+	var lines = string.split(";")
+	for line in lines:
+		_eval_params_line(node, line)
+
+func _eval_params_line(node:Node, line:String):
+	var components = line.split('=')
+	if len(components) > 1:
+		var param_name = components[0].strip_edges()
+		var expression = components[1].strip_edges()
+
+		var e = Expression.new()
+		e.parse(expression, ['node'])
+		var x = e.execute([node])
+		if e.has_execute_failed():
+			printerr("Execution Error on line '",line ,": ",e.get_error_text())
+		node.set(param_name, x)
+		#print(param_name,expression,e,x, node.get(param_name))
+	else:
+		var e = Expression.new()
+		e.parse(line, ['node'])
+		var x = e.execute([node])
+		print(line,e,x, node)
+		if e.has_execute_failed():
+			printerr("Execution Error on line '",line ,": ",e.get_error_text())
+
 
 func _material(node, metas, meta, meta_val):
 	var surface_split = meta.split("_")
@@ -122,83 +143,6 @@ func _material(node, metas, meta, meta_val):
 			material.set_shader(shader)
 		
 		node.set_surface_override_material(int(surface), material)
-			
-# 2024-05-09 LEGACY... eventually remove
-func _multimesh(node, metas, meta, meta_val):
-	var mm_i = MultiMeshInstance3D.new()
-	node.get_parent().add_child(mm_i)
-	
-	var scatter_size = Vector3(10,10,10)
-	if "size_x" in metas:
-		scatter_size.x = float(node.get_meta("size_x"))
-		scatter_size.y = float(node.get_meta("size_y"))
-		scatter_size.z = float(node.get_meta("size_z"))
-	
-	mm_i.set("scatter_size", scatter_size)
-	
-	mm_i.transform = node.transform
-	
-	var target : MeshInstance3D = get_node(meta_val)
-	mm_i.name = target.name + "_Multimesh"
-	
-	var mm = MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = target.mesh
-	mm_i.multimesh = mm
-	
-	mm_i.set_owner(get_tree().edited_scene_root)
-	
-	##
-	
-	if "script" in metas:
-		mm_i.set_script(load(node.get_meta("script")))
-	
-	##
-	
-	if "prop_file" in metas:
-		_set_script_params(mm_i, node.get_meta("prop_file"))
-	
-	# occlusion culling flickers... more investigation needed
-	if "occlusion_culling" in metas:
-		var occlusion = OccluderInstance3D.new()
-		node.get_parent().add_child(occlusion)
-		
-		occlusion.name = "OccluderInstance3D"
-		occlusion.transform = node.transform
-		
-		var box_occluder = BoxOccluder3D.new()
-		box_occluder.size = scatter_size
-		occlusion.occluder = box_occluder
-		
-		occlusion.set_owner(get_tree().edited_scene_root)
-	##
-	
-	if "camera_node" in metas:
-		var dyn_node = Node.new()
-		node.get_parent().add_child(dyn_node)
-		
-		dyn_node.name = "DynamicInstancingNode"
-		dyn_node.set_script(load(node.get_meta("dynamic_script")))
-		
-		dyn_node.set("target_path", node.get_meta("camera_node"))
-		dyn_node.set("multimesh_path", "../" + mm_i.name)
-		
-		var plane_size = Vector2(scatter_size.x, scatter_size.z).length()
-		
-		dyn_node.set("distance_fade_start", plane_size)
-		dyn_node.set("distance_fade_end", plane_size * 2)
-		
-		dyn_node.set_owner(get_tree().edited_scene_root)
-	##
-	
-	# THIS DOES NOT WORK APPARENTLY
-	if "group" in metas:
-		mm_i.add_to_group(node.get_meta("group"), true)
-	
-	##
-	
-	target.hide()
-	delete_nodes.append(node)
 
 # COLLLISIONS
 func collision_script(body, node, metas) -> void:
@@ -208,46 +152,13 @@ func collision_script(body, node, metas) -> void:
 	if "prop_file" in metas:
 		# collision handled separately
 		_set_script_params(body, node.get_meta("prop_file"))
+
+	if "prop_string" in metas:
+		_set_script_params_str(body, node.get_meta("prop_string"))
 	
 	if "physics_mat" in metas:
 		if body is StaticBody3D or body is RigidBody3D:
 			body.physics_material_override = load(node.get_meta("physics_mat"))
-
-# LEGACY 06/24/24
-func _complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas):
-	var mesh_inst : MeshInstance3D = node
-
-	if simple: mesh_inst.create_convex_collision()
-	if trimesh: mesh_inst.create_trimesh_collision()
-	mesh_inst.set_owner(get_tree().edited_scene_root)
-	
-	#if rigid_body or area_3d:
-	var body = StaticBody3D.new()
-	body.name = node.name + "_StaticBody3D"
-	
-	if rigid_body:
-		body = RigidBody3D.new()
-		body.name = node.name + "_RigidBody3D"
-	
-	if area_3d:
-		body = Area3D.new()
-		body.name = node.name + "_Area3D"
-	
-	var col = node.get_children()[0].get_children()[0]
-	reparent_nodes.append([col, body])
-	
-	reparent_nodes.append([node, body])
-	
-	delete_nodes.append(node.get_children()[0])
-	
-	var discard_mesh = "-d" in meta_val
-	if discard_mesh: delete_nodes.append(node)
-	
-	node.get_parent().add_child(body)
-	body.set_owner(get_tree().edited_scene_root)
-	
-	collision_script(body, node, metas)
-
 
 # NEW COLLISION - CAPTURES ALL TYPES NOW 06/24/24
 func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
@@ -267,19 +178,22 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 	
 	var simple: bool = "simple" in meta_val
 	var trimesh: bool = "trimesh" in meta_val
-	var mesh_inst: MeshInstance3D = node
+	
+	# try to generate trimesh (concave) or simple (convex) collisions
 	var trimesh_shape := ConcavePolygonShape3D.new()
 	var simple_shape := ConvexPolygonShape3D.new()
-	if simple:
-		mesh_inst.create_convex_collision()
-		body = node.get_children()[0].duplicate()
-		var col_shape_3d: CollisionShape3D = body.get_children()[0]
-		simple_shape = col_shape_3d.shape.duplicate()
-	if trimesh:
-		mesh_inst.create_trimesh_collision()
-		body = node.get_children()[0].duplicate()
-		var col_shape_3d: CollisionShape3D = body.get_children()[0]
-		trimesh_shape = col_shape_3d.shape.duplicate()
+	if node is MeshInstance3D:
+		var mesh_inst: MeshInstance3D = node
+		if simple:
+			mesh_inst.create_convex_collision()
+			body = node.get_children()[0].duplicate()
+			var col_shape_3d: CollisionShape3D = body.get_children()[0]
+			simple_shape = col_shape_3d.shape.duplicate()
+		if trimesh:
+			mesh_inst.create_trimesh_collision()
+			body = node.get_children()[0].duplicate()
+			var col_shape_3d: CollisionShape3D = body.get_children()[0]
+			trimesh_shape = col_shape_3d.shape.duplicate()
 	
 	# ---
 	
@@ -383,8 +297,6 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 
 # NEW COLLISION - CAPTURES ALL TYPES NOW 06/24/24
 func _collision(node, metas, meta, meta_val):
-	var mesh_inst : MeshInstance3D = node
-	
 	var rigid_body = false
 	if "-r" in meta_val: rigid_body = true
 	
@@ -396,7 +308,6 @@ func _collision(node, metas, meta, meta_val):
 	
 	if simple or trimesh:	
 		_primitive_col(node, rigid_body, area_3d, meta_val, metas)
-		#_complex_col(node, rigid_body, area_3d, simple, trimesh, meta_val, metas)
 	else:
 		_primitive_col(node, rigid_body, area_3d, meta_val, metas)
 
@@ -479,10 +390,9 @@ func iterate_scene(node):
 		iterate_scene(child)
 
 	# after this point, all children have been parsed (or don't exist)
-	# we only ever parse mesh instance 3Ds from Blender (e.g. BLENDER OBJECTS)
+	# update - we should be able to parse all Node3Ds.. right?
 	node.owner = get_tree().edited_scene_root
-	if node is MeshInstance3D:
-		var mesh_inst : MeshInstance3D = node
+	if node is Node:
 		
 		var metas = node.get_meta_list()
 		for meta in metas:
@@ -496,7 +406,7 @@ func iterate_scene(node):
 			# PARSE NAME OVERRIDE FIRST
 			if "name_override" in metas:
 				if node.get_meta("name_override") != "":
-					mesh_inst.name = node.get_meta("name_override")
+					node.name = node.get_meta("name_override")
 			
 			# 2024-05-09 I don't even know what this was for anymore
 			if "group" in meta:
@@ -510,10 +420,10 @@ func iterate_scene(node):
 				# collision handled separately. good reasons for this
 				if "collision" not in metas and "nav_mesh" not in metas:
 					_set_script_params(node, meta_val)
-			
-			# LEGACY MULTIMESH
-			if meta == "multimesh_target":
-				_multimesh(node, metas, meta, meta_val)
+
+			if meta == "prop_string":
+				if "collision" not in metas and "nav_mesh" not in metas:
+					_set_script_params_str(node, meta_val)
 			
 			# new collision logic as of v1.3 2024/02/01
 			if meta == "collision":
@@ -524,13 +434,19 @@ func iterate_scene(node):
 				
 			if meta == "multimesh":
 				_multimesh_new(node, meta, meta_val)
+			
+			if meta == "packed_scene":
+				var packed_scene = load(meta_val).instantiate()
+				packed_scene.name = "PackedScene_" + node.name
+				node.get_parent().add_child(packed_scene)
+				packed_scene.global_transform = node.global_transform
+				packed_scene.owner = get_tree().edited_scene_root
+				delete_nodes.push_back(node)
 
 func iterate_scene_pass2(node):
 	for child in node.get_children():
 		iterate_scene_pass2(child)
 
-	# not explicitly checking if node is MeshInstance3D here..
-	# maybe this is a good idea?
 	var metas = node.get_meta_list()
 	for meta in metas:
 		var meta_val = node.get_meta(meta)
