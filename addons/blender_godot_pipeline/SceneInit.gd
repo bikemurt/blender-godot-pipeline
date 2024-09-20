@@ -185,14 +185,14 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 	if node is MeshInstance3D:
 		var mesh_inst: MeshInstance3D = node
 		if simple:
-			mesh_inst.create_convex_collision()
-			body = node.get_children()[0].duplicate()
-			var col_shape_3d: CollisionShape3D = body.get_children()[0]
+			var dummy_mesh := mesh_inst.duplicate()
+			dummy_mesh.create_convex_collision()
+			var col_shape_3d: CollisionShape3D = dummy_mesh.get_children()[0].get_children()[0]
 			simple_shape = col_shape_3d.shape.duplicate()
 		if trimesh:
-			mesh_inst.create_trimesh_collision()
-			body = node.get_children()[0].duplicate()
-			var col_shape_3d: CollisionShape3D = body.get_children()[0]
+			var dummy_mesh := mesh_inst.duplicate()
+			dummy_mesh.create_trimesh_collision()
+			var col_shape_3d: CollisionShape3D = dummy_mesh.get_children()[0].get_children()[0]
 			trimesh_shape = col_shape_3d.shape.duplicate()
 	
 	# ---
@@ -303,13 +303,7 @@ func _collision(node, metas, meta, meta_val):
 	var area_3d = false
 	if "-a" in meta_val: area_3d = true
 	
-	var simple = "simple" in meta_val
-	var trimesh = "trimesh" in meta_val
-	
-	if simple or trimesh:	
-		_primitive_col(node, rigid_body, area_3d, meta_val, metas)
-	else:
-		_primitive_col(node, rigid_body, area_3d, meta_val, metas)
+	_primitive_col(node, rigid_body, area_3d, meta_val, metas)
 
 # NAV MESH
 func _nav_mesh(node, meta, meta_val) -> void:
