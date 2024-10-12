@@ -1,37 +1,53 @@
 # Michael Burt 2024
 # www.michaeljared.ca
-# Reach out on Twitter for support @_michaeljared
+# Join the discord for support (you can get the Discord link from my website)
 
 @tool
-
 extends Node3D
 
 ## Remove the originally imported
 ## GLTF node from your scene. This should be done when the design of a 
-## level is complete. Doing this effectively disables "hot reload",
+## level is complete. Doing this disables "hot reload",
 ## so if you make further changes to your scene in Blender, you need to delete the
 ## _Imported node from the scene tree, re-import the GLTF file, and drag it 
 ## into the scene tree.
-@export var remove_original_node := false:
-	get: return remove_original_node
+@export var disable_hot_reload := false:
+	get: return disable_hot_reload
 	set(value):
 		if value and Engine.is_editor_hint():
 			queue_free()
+
+@export var global_data = {}
+@export var gltf_path: String = ""
+
+func check_global_flag(key: String) -> bool:
+	return key in global_data and global_data[key] == 1
+
+var addon_root := "res://addons/blender_godot_pipeline/"
 
 var reparent_nodes = []
 var delete_nodes = []
 var multimesh_dict = {}
 
 var duplicate_scene: Node
+
+func debug_msg(msg: String, time := 1.0) -> void:
+	await get_tree().create_timer(time).timeout
+	print(msg)
+	pass
+
 func run_setup() -> void:
 	if Engine.is_editor_hint():
 		if get_meta("run"):
 			
+			DirAccess.make_dir_absolute(gltf_path.get_base_dir() + "/packed_scenes")
 			print("Blender-Godot Pipeline: Running SceneInit - processing the scene.")
 			
-			await get_tree().create_timer(0.1).timeout
-	
+			#await get_tree().create_timer(2.0).timeout
+			
 			duplicate_all()
+			
+			#await get_tree().create_timer(2.0).timeout
 			
 			remove_skips(duplicate_scene)
 			
@@ -45,18 +61,25 @@ func run_setup() -> void:
 			# SECOND PASS - process materials
 			iterate_scene_pass2(duplicate_scene)
 			
+			# these timers feel so hacky, but not sure how else to remedy this
+			await get_tree().create_timer(0.2).timeout
+			
+			# parse globals on top level only
+			parse_globals(duplicate_scene)
+			
 			# ensure that SceneInit only runs once
 			set_meta("run", false)
 			
 			hide()
 			
 			print("Blender-Godot Pipeline: Scene processing complete. ")
+		
+			EditorInterface.get_resource_filesystem().scan()
 
 func _ready():
 	run_setup()
 
 func duplicate_all() -> void:
-	
 	duplicate_scene = duplicate()
 	duplicate_scene.show()
 	
@@ -73,6 +96,7 @@ func duplicate_all() -> void:
 		get_parent().remove_child(delete_node)
 		delete_node.queue_free()
 	
+	# "Make Local" programmatically
 	duplicate_scene.scene_file_path = ""
 	duplicate_scene.name = new_name
 	
@@ -86,6 +110,8 @@ func reparent_pass():
 		node[0].reparent(node[1], true)
 		node[0].set_owner(get_tree().edited_scene_root)
 		
+		# this recursively finds all of the children of node[0]
+		# and sets their scene_root
 		set_children_scene_root(node[0])
 		
 func delete_pass():
@@ -95,7 +121,12 @@ func delete_pass():
 func set_children_scene_root(node):
 	for child in node.get_children():
 		set_children_scene_root(child)
-		child.set_owner(get_tree().edited_scene_root)
+		child.owner = get_tree().edited_scene_root
+
+func set_children_to_parent(node, parent_to):
+	for child in node.get_children():
+		set_children_to_parent(node, parent_to)
+		child.owner = parent_to
 
 func _set_script_params(node:Node, script_filepath):
 	var script_file = FileAccess.open(script_filepath, FileAccess.READ)
@@ -122,6 +153,8 @@ func _eval_params_line(node:Node, line:String):
 		if e.has_execute_failed():
 			printerr("Execution Error on line '",line ,": ",e.get_error_text())
 		node.set(param_name, x)
+		
+		# debug?
 		#print(param_name,expression,e,x, node.get(param_name))
 	else:
 		var e = Expression.new()
@@ -160,19 +193,27 @@ func collision_script(body, node, metas) -> void:
 		if body is StaticBody3D or body is RigidBody3D:
 			body.physics_material_override = load(node.get_meta("physics_mat"))
 
-# NEW COLLISION - CAPTURES ALL TYPES NOW 06/24/24
-func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
+# updated collision logic oct 7, 2024
+func _collisions(node, meta_val, metas):
 	var t = node.transform
 	var body = StaticBody3D.new()
 	body.name = "StaticBody3D_" + node.name
 	
-	if rigid_body:
+	if "-r" in meta_val:
 		body = RigidBody3D.new()
 		body.name = "RigidBody3D_" + node.name
 	
-	if area_3d:
+	if "-a" in meta_val:
 		body = Area3D.new()
 		body.name = "Area3D_" + node.name
+	
+	if "-m" in meta_val:
+		body = AnimatableBody3D.new()
+		body.name = "AnimatableBody3D_" + node.name
+	
+	if "-h" in meta_val:
+		body = CharacterBody3D.new()
+		body.name = "CharacterBody3D_" + node.name
 	
 	# --- NEW --- migrating simple/trimesh into primitive function
 	
@@ -202,7 +243,7 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 	body.position = node.position
 	
 	var discard_mesh = "-d" in meta_val
-	var nd : Node3D = node.duplicate()
+	var nd: Node3D = node.duplicate()
 	if not discard_mesh:
 		# clear all children
 		var children = []
@@ -266,6 +307,18 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 				
 				cs.shape = sph
 		
+		if "capsule" in meta_val:
+			if "height" in metas and "radius" in metas:
+				var cap = CapsuleShape3D.new()
+				
+				var height = float(node.get_meta("height"))
+				var radius = float(node.get_meta("radius"))
+				
+				cap.height = height
+				cap.radius = radius
+				
+				cs.shape = cap
+		
 		if trimesh: cs.shape = trimesh_shape
 		if simple: cs.shape = simple_shape
 		
@@ -279,6 +332,7 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 	
 	if not col_only:
 		node.get_parent().add_child(body)
+		#body.owner = node
 		body.owner = get_tree().edited_scene_root
 		
 		if not discard_mesh: nd.owner = get_tree().edited_scene_root
@@ -294,16 +348,6 @@ func _primitive_col(node, rigid_body, area_3d, meta_val, metas):
 	delete_nodes.append(node)
 	
 	collision_script(body, node, metas)
-
-# NEW COLLISION - CAPTURES ALL TYPES NOW 06/24/24
-func _collision(node, metas, meta, meta_val):
-	var rigid_body = false
-	if "-r" in meta_val: rigid_body = true
-	
-	var area_3d = false
-	if "-a" in meta_val: area_3d = true
-	
-	_primitive_col(node, rigid_body, area_3d, meta_val, metas)
 
 # NAV MESH
 func _nav_mesh(node, meta, meta_val) -> void:
@@ -326,7 +370,7 @@ func _nav_mesh(node, meta, meta_val) -> void:
 	
 	delete_nodes.append(mesh_inst)
 
-# MULTTIMESH
+# MULTIMESH
 func _multimesh_new(node, meta, meta_val) -> void:
 	if meta_val not in multimesh_dict:
 		multimesh_dict[meta_val] = []
@@ -419,9 +463,9 @@ func iterate_scene(node):
 				if "collision" not in metas and "nav_mesh" not in metas:
 					_set_script_params_str(node, meta_val)
 			
-			# new collision logic as of v1.3 2024/02/01
+			# collision logic updated again oct 7, 2024
 			if meta == "collision":
-				_collision(node, metas, meta, meta_val)
+				_collisions(node, meta_val, metas)
 			
 			if meta == "nav_mesh":
 				_nav_mesh(node, meta, meta_val)
@@ -430,6 +474,7 @@ func iterate_scene(node):
 				_multimesh_new(node, meta, meta_val)
 			
 			if meta == "packed_scene":
+				await get_tree().create_timer(0.1).timeout
 				var packed_scene = load(meta_val).instantiate()
 				packed_scene.name = "PackedScene_" + node.name
 				node.get_parent().add_child(packed_scene)
@@ -446,3 +491,46 @@ func iterate_scene_pass2(node):
 		var meta_val = node.get_meta(meta)
 		if "material" in meta:
 			_material(node, metas, meta, meta_val)
+
+func set_child_ownership(node):
+	for c in node.get_children():
+		c.owner = node
+		set_child_ownership(c)
+
+func parse_globals(node):
+	for child in node.get_children():
+		if child is Node3D:
+			var n := child as Node3D
+			var preserve_position := n.global_position
+				
+			# reset origin
+			if check_global_flag("individual_origins"):
+				n.global_position = Vector3(0,0,0)
+			
+			# pack all into scenes
+			if check_global_flag("packed_resources"):
+				var ps := PackedScene.new()
+				
+				# before packing, we need to reset the owner of all children
+				# to be this node
+				set_child_ownership(child)
+				var res := ps.pack(child)
+				
+				if res == OK:
+
+					#var scene_path: String = addon_root + "packed_scenes/" + child.name + ".tscn"
+					var scene_path: String = gltf_path.get_base_dir() + "/packed_scenes/" + child.name + ".tscn"
+					var error = ResourceSaver.save(ps, scene_path)
+					if error:
+						print("Blender-Godot Pipeline: Error saving scene (" + scene_path + ") to disk.")
+					else:
+						# save was good, we can now unlink the node
+						var packed_scene = load(scene_path).instantiate()
+						packed_scene.name = "PackedScene_" + child.name
+						node.add_child(packed_scene)
+						if check_global_flag("individual_origins"):
+							(packed_scene as Node3D).global_position = preserve_position
+						packed_scene.owner = get_tree().edited_scene_root
+						
+						child.queue_free()
+	
