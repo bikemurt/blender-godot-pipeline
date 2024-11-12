@@ -17,8 +17,13 @@ extends Node3D
 		if value and Engine.is_editor_hint():
 			queue_free()
 
+## When set to true, the node that connects to the imported GLTF file will be removed
+## when your game starts. This should be left on unless you have a specific reason not to.
+@export var runtime_remove := true
+
 @export var global_data = {}
 @export var gltf_path: String = ""
+
 
 func check_global_flag(key: String) -> bool:
 	return key in global_data and global_data[key] == 1
@@ -78,6 +83,9 @@ func run_setup() -> void:
 
 func _ready():
 	run_setup()
+
+	if not Engine.is_editor_hint() and runtime_remove:
+		queue_free()
 
 func duplicate_all() -> void:
 	duplicate_scene = duplicate()
