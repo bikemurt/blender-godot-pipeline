@@ -1,6 +1,8 @@
 <img src="addons/blender_godot_pipeline/icon.png" width="64" align="left" />
 
 ## blender-godot-pipeline
+ prov
+NOTE: This project was started before I really understood `GLTFDocumentExtension` well. [GLTFDocumentExtension](https://docs.godotengine.org/en/stable/classes/class_gltfdocumentextension.html) provides a much preferable way to parse GLTF files, and .blend file parsing comes natively as a part of Godot's extended pipeline functionality.
 
 **Helper Godot 4 addon for my Blender addon which is available on the blender market here.**
 
