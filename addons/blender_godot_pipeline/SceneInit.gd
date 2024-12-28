@@ -286,7 +286,7 @@ func _collisions(node, meta_val, metas):
 				var center_x = float(node.get_meta("center_x"))
 				var center_y = float(node.get_meta("center_y"))
 				var center_z = float(node.get_meta("center_z"))
-				cs.position = Vector3(center_x, center_y, center_z)
+				cs.position += Vector3(center_x, center_y, center_z)
 		
 		if "box" in meta_val:
 			if "size_x" in metas and "size_x" in metas \
