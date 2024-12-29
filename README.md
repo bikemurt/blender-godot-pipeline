@@ -2,7 +2,7 @@
 
 ## blender-godot-pipeline
 
-**Helper Godot 4 addon for my Blender addon which is available on the blender market here.**
+**Helper Godot 4 addon for my Blender addon which is available on the blender market:**
 
 [Blender Addon](https://blendermarket.com/products/blender-godot-pipeline-addon)
 
