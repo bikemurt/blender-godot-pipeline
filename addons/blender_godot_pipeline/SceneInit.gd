@@ -431,11 +431,10 @@ func _set_script(node, metas, meta, meta_val) -> void:
 		node.set_script(load(meta_val))
 
 func remove_skips(node):
-	var n: Node3D
 	for child in node.get_children():
 		if "state" in child.get_meta_list():
 			if child.get_meta("state") == "skip":
-				child.queue_free()
+				child.free()
 			else:
 				remove_skips(child)
 
