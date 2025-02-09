@@ -489,12 +489,13 @@ func iterate_scene(node):
 				_multimesh_new(node, meta, meta_val)
 			
 			if meta == "packed_scene":
-				await get_tree().create_timer(0.1).timeout
+				#await get_tree().create_timer(0.1).timeout
 				var packed_scene = load(meta_val).instantiate()
 				packed_scene.name = "PackedScene_" + node.name
 				node.get_parent().add_child(packed_scene)
 				packed_scene.global_transform = node.global_transform
 				packed_scene.owner = get_tree().edited_scene_root
+				
 				delete_nodes.push_back(node)
 
 func iterate_scene_pass2(node):
