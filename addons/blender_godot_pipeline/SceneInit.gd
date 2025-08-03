@@ -280,6 +280,9 @@ func _collisions(node, meta_val, metas):
 		cs.scale = node.scale
 		cs.rotation = node.rotation
 		
+		if Engine.get_version_info().hex >= 0x040400:
+			cs.debug_fill = false
+		
 		# bump the position by the offset defined
 		if not simple and not trimesh:
 			if "center_x" in metas and "center_y" in metas and "center_z" in metas:
