@@ -58,12 +58,11 @@ func debug_msg(msg: String, time := 1.0) -> void:
 	print(msg)
 
 func run_setup() -> void:
-	if get_tree().edited_scene_root != EditorInterface.get_edited_scene_root():
-		printerr("Blender-Godot Pipeline: Import pipeline only works when the correct scene is open. Expected: " + str(get_tree().edited_scene_root)) 
-		
-		return
-		
 	if Engine.is_editor_hint():
+		if get_tree().edited_scene_root != EditorInterface.get_edited_scene_root():
+			printerr("Blender-Godot Pipeline: Import pipeline only works when the correct scene is open. Expected: " + str(get_tree().edited_scene_root)) 
+			
+			return
 		BlenderGodotPipeline.count += 1
 		if get_meta("run") and count == 2:
 			
