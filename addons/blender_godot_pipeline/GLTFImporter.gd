@@ -1,4 +1,4 @@
-# Michael Burt 2024
+# Michael Burt 2025
 # www.michaeljared.ca
 # Join the discord for support (you can get the Discord link from my website)
 
@@ -9,6 +9,8 @@ extends EditorScenePostImport
 var node_extras_dict = {}
 func _post_import(scene):
 	print("Blender-Godot Pipeline: Starting the post import process.")
+	
+	BlenderGodotPipeline.count = 0
 	
 	var source := get_source_file()
 	

@@ -1,8 +1,16 @@
-# Michael Burt 2024
+# Michael Burt 2025
 # www.michaeljared.ca
 # Join the discord for support (you can get the Discord link from my website)
 
+# A note on static typing:
+# Static typing is better and makes sense to use in your game.
+# This is a tool script, something usually a part of the "asset conditioning pipeline".
+# In light of that, we aren't super concerned with run-time performance as this 
+# script should only run at import time. Dynamic typing makes a few things a little
+# easier if we make some assumptions about what nodes are imported.
+
 @tool
+class_name BlenderGodotPipeline
 extends Node3D
 
 ## Remove the originally imported
@@ -36,23 +44,32 @@ var multimesh_dict = {}
 
 var duplicate_scene: Node
 
+# Update 2025-09-27: I *think* the Invalid Owner issues are finally fixed
+# This static count variable gets reset to 0 whenever an import is triggered
+# The first time _ready is triggered from the node reloading on import. It is 
+# triggered again when the Godot GLTF import pipeline reloads the scene entirely.
+# We only want to run the pipeline the 2nd time _ready runs... so this fixes it
+# Is it hacky? Yes. I don't know of any other solution at this time.
+# https://github.com/bikemurt/blender-godot-pipeline/issues/16
+static var count = 0
+
 func debug_msg(msg: String, time := 1.0) -> void:
 	await get_tree().create_timer(time).timeout
 	print(msg)
-	pass
 
 func run_setup() -> void:
 	if Engine.is_editor_hint():
-		if get_meta("run"):
+		BlenderGodotPipeline.count += 1
+		if get_meta("run") and count == 2:
 			
-			DirAccess.make_dir_absolute(gltf_path.get_base_dir() + "/packed_scenes")
+			# ensure that SceneInit only runs once
+			set_meta("run", false)
+			
 			print("Blender-Godot Pipeline: Running SceneInit - processing the scene.")
 			
-			#await get_tree().create_timer(2.0).timeout
+			DirAccess.make_dir_absolute(gltf_path.get_base_dir() + "/packed_scenes")
 			
 			duplicate_all()
-			
-			#await get_tree().create_timer(2.0).timeout
 			
 			remove_skips(duplicate_scene)
 			
@@ -66,24 +83,22 @@ func run_setup() -> void:
 			# SECOND PASS - process materials
 			iterate_scene_pass2(duplicate_scene)
 			
+			# update 2025-09-27. I don't think we need this anymore
 			# these timers feel so hacky, but not sure how else to remedy this
-			await get_tree().create_timer(0.2).timeout
+			#await get_tree().create_timer(0.2).timeout
 			
 			# parse globals on top level only
 			parse_globals(duplicate_scene)
 			
-			# ensure that SceneInit only runs once
-			set_meta("run", false)
-			
 			hide()
+			
+			EditorInterface.get_resource_filesystem().scan()
 			
 			print("Blender-Godot Pipeline: Scene processing complete. ")
 		
-			EditorInterface.get_resource_filesystem().scan()
 
 func _ready():
 	run_setup()
-
 	if not Engine.is_editor_hint() and runtime_remove:
 		queue_free()
 
@@ -121,7 +136,7 @@ func reparent_pass():
 		# this recursively finds all of the children of node[0]
 		# and sets their scene_root
 		set_children_scene_root(node[0])
-		
+
 func delete_pass():
 	for node in delete_nodes:
 		node.queue_free()
@@ -171,7 +186,6 @@ func _eval_params_line(node:Node, line:String):
 		print(line,e,x, node)
 		if e.has_execute_failed():
 			printerr("Execution Error on line '",line ,": ",e.get_error_text())
-
 
 func _material(node, metas, meta, meta_val):
 	var surface_split = meta.split("_")
@@ -351,12 +365,12 @@ func _collisions(node, meta_val, metas):
 	
 	if not col_only:
 		node.get_parent().add_child(body)
-		#body.owner = node
 		body.owner = get_tree().edited_scene_root
 		
 		if not discard_mesh: nd.owner = get_tree().edited_scene_root
 	
-	cs.owner = get_tree().edited_scene_root
+	if "bodyonly" not in meta_val:
+		cs.owner = get_tree().edited_scene_root
 	
 	# check for any collisions children, reparent to body
 	for child in node.get_children():
@@ -382,7 +396,8 @@ func _nav_mesh(node, meta, meta_val) -> void:
 	nr.navigation_mesh = n
 	nr.transform = mesh_inst.transform
 	nr.name = mesh_inst.name + "_NavMesh"
-	_set_script_params(nr, node.get_meta("prop_file"))
+	if node.has_meta("prop_file"):
+		_set_script_params(nr, node.get_meta("prop_file"))
 	
 	mesh_inst.get_parent().add_child(nr)
 	nr.owner = get_tree().edited_scene_root
@@ -444,12 +459,15 @@ func remove_skips(node):
 func iterate_scene(node):
 	for child in node.get_children():
 		iterate_scene(child)
-
+	
+	# we don't need to run the pipeline on the _Imported node
+	if node == duplicate_scene: return
+	
 	# after this point, all children have been parsed (or don't exist)
 	# update - we should be able to parse all Node3Ds.. right?
 	node.owner = get_tree().edited_scene_root
+	
 	if node is Node:
-		
 		var metas = node.get_meta_list()
 		for meta in metas:
 			
@@ -552,4 +570,3 @@ func parse_globals(node):
 						packed_scene.owner = get_tree().edited_scene_root
 						
 						child.queue_free()
-	
